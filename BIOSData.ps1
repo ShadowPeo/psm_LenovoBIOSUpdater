@@ -1,119 +1,224 @@
-param 
-    (
-        #School Details
-        #[string]$mode = "FirstRun" #Used to define where in the process the script is starting from
-    )
+#requires -version 2
+<#
+.SYNOPSIS
+  Reads Snipe-IT for machine data, then uses this data to build an array of information to set the BIOS fields on a Lenovo Device compatible with WinAIA
+  Other functions pull from MDT data and the environment to fill in more data
 
+.DESCRIPTION
+
+.PARAMETER <Parameter_Name>
+  <Brief description of parameter input required. Repeat this attribute if required>
+
+.INPUTS
+    Serial number of device (pulled from BIOS)
+    Data from Snipe-IT
+    
+.OUTPUTS
+    Laptop sync to Intune if assigned, if not script to do it on first login
+  
+.NOTES
+  Version:        1.0
+  Author:         Justin Simmonds
+  Creation Date:  2022-10-05
+  Purpose/Change: Initial script development
+  
+.EXAMPLE
+  
+#>
+
+#---------------------------------------------------------[Initialisations]--------------------------------------------------------
+
+#Set Error Action to Silently Continue
+$ErrorActionPreference = "SilentlyContinue"
+
+#Dot Source required Function Libraries
+
+#Modules
 Import-Module "$PSScriptRoot/Config.ps1" #Contains protected data (API Keys, URLs etc)
-Import-Module "$PSScriptRoot/DevEnv.ps1" ##Temporary Variables used for development and troubleshooting
+Import-Module "$PSScriptRoot/DevEnv.ps1" -Force ##Temporary Variables used for development and troubleshooting
 
-$headers=@{}
-$headers.Add("accept", "application/json")
-$headers.Add("Authorization", "Bearer $snipeAPIKey")
+#----------------------------------------------------------[Declarations]----------------------------------------------------------
 
-#These are the fields able to be set, use this array to set defaults - anything that has not value set upon processing will be ignored and thus no change will be made to existing data
+$sLogFile = Join-Path -Path $sLogPath -ChildPath $sLogName
 
-$biosDetails =  @(
-    #("USERDEVICE.label1",""), #Custom Field - Change "Label1" to what you want to call the field
-    #("USERDEVICE.label2",""), #Custom Field - Change "Label2" to what you want to call the field
-    #("USERDEVICE.label3",""), #Custom Field - Change "Label3" to what you want to call the field
-    #("USERDEVICE.label4",""), #Custom Field - Change "Label4" to what you want to call the field
-    #("USERDEVICE.label5",""), #Custom Field - Change "Label5" to what you want to call the field
-    ("NETWORKCONNECTION.NUMNICS",""),
-    ("NETWORKCONNECTION.GATEWAY",""),
-    ("NETWORKCONNECTION.IPADDRESS",""),
-    ("NETWORKCONNECTION.SUBNETMASK",""),
-    ("NETWORKCONNECTION.SYSTEMNAME",""),
-    ("NETWORKCONNECTION.LOGINNAME",""),
-    ("PRELOADPROFILE.IMAGEDATE",""),
-    ("PRELOADPROFILE.IMAGE",""),
-    ("OWNERDATA.OWNERNAME",""),
-    ("OWNERDATA.DEPARTMENT",""),
-    ("OWNERDATA.LOCATION",""),
-    ("OWNERDATA.PHONE_NUMBER",""),
-    ("OWNERDATA.OWNERPOSITION",""),
-    ("LEASEDATA.LEASE_START_DATE",""),
-    ("LEASEDATA.LEASE_END_DATE",""),
-    ("LEASEDATA.LEASE_TERM",""),
-    ("LEASEDATA.LEASE_AMOUNT",""),
-    ("LEASEDATA.LESSOR",""),
-    ("USERASSETDATA.PURCHASE_DATE",""),
-    ("USERASSETDATA.LAST_INVENTORIED",""),
-    ("USERASSETDATA.WARRANTY_END",""),
-    ("USERASSETDATA.WARRANTY_DURATION",""),
-    ("USERASSETDATA.AMOUNT",""),
-    ("USERASSETDATA.ASSET_NUMBER","")
+
+# These are the fields able to be set, use this array to set defaults - anything that has not value set upon processing will be ignored and thus no change will be made to existing data. To Blank the field please set to BLANK (Case Sesnsive)
+$biosDetails =  @{
+    "NETWORKCONNECTION.NUMNICS"=""
+    "NETWORKCONNECTION.GATEWAY"=""
+    "NETWORKCONNECTION.IPADDRESS"=""
+    "NETWORKCONNECTION.SUBNETMASK"=""
+    "NETWORKCONNECTION.SYSTEMNAME"=""
+    "NETWORKCONNECTION.LOGINNAME"=""
+    "PRELOADPROFILE.IMAGEDATE"=""
+    "PRELOADPROFILE.IMAGE"=""
+    "OWNERDATA.OWNERNAME"="Western Port Secondary College"
+    "OWNERDATA.DEPARTMENT"="ICT Department"
+    "OWNERDATA.LOCATION"="Hastings, Victoria Australia"
+    "OWNERDATA.PHONE_NUMBER"="03 5979 1577"
+    "OWNERDATA.OWNERPOSITION"=""
+    "LEASEDATA.LEASE_START_DATE"=""
+    "LEASEDATA.LEASE_END_DATE"=""
+    "LEASEDATA.LEASE_TERM"=""
+    "LEASEDATA.LEASE_AMOUNT"=""
+    "LEASEDATA.LESSOR"=""
+    "USERASSETDATA.PURCHASE_DATE"=""
+    "USERASSETDATA.LAST_INVENTORIED"=""
+    "USERASSETDATA.WARRANTY_END"=""
+    "USERASSETDATA.WARRANTY_DURATION"=""
+    "USERASSETDATA.AMOUNT"=""
+    "USERASSETDATA.ASSET_NUMBER"=""
+}
+
+# Decomission Task Sequence ID's - this is used to blank the data
+$decomIDs = @(
+    'DECOM'
 )
 
+#Script Variables - Declared to stop it being generated multiple times per run
+$script:snipeResult = $null #Blank Snipe result
 
-$assetSerial = "R90YHGAH"
+#-----------------------------------------------------------[Functions]------------------------------------------------------------
 
-$response = ConvertFrom-Json((Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$($assetSerial)" -Method GET -Headers $headers).Content)
-if ($response.total -eq 1)
+function Write-Log ($logMessage)
 {
-    $response = $response.rows[0]
-    $asset.ASSET = $response.asset_tag
-    $asset.CASES = (($response.custom_fields).'CASES Asset').value
-    $asset.Name = $response.name
-    $asset.Model = ($response.model).name#>
-}
-elseif ($response.total -gt 1)
-{
-    Write-Host "More than one item found with $($asset.SERIAL) continuing to next row"
-    continue
-
-}
-else 
-{
-    Write-Host "No item found with $($asset.SERIAL) continuing to next row"
-    continue
+    Write-Host "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
 }
 
-
-
-<#
-
-$importFile = "Dymo.csv"
-
-$assets = Import-CSV $importFile
-
-
-foreach ($asset in $assets)
+function Set-ImageData
 {
-    $response = $null
-    if ( -not [string]::IsNullOrWhiteSpace($asset.ASSET))
+    $biosDetails.'PRELOADPROFILE.IMAGE' = $env:_SMSTSPackageID
+    $biosDetails.'PRELOADPROFILE.IMAGEDATE' = "$(Get-Date -format "yyyyMMdd")"
+}
+
+function Set-Inventoried
+{
+    $biosDetails.'USERASSETDATA.LAST_INVENTORIED' = "$(Get-Date -format "yyyyMMdd")"
+}
+
+function Get-SnipeData
+{
+    # Retrieve Serial from BIOS
+    #$deviceSerial = (Get-CimInstance win32_bios | Select serialnumber).serialnumber
+    $deviceSerial = $devSerial
+    $script:snipeResult = $null #Blank Snipe result
+
+    $checkURL=$snipeURL.Substring((Select-String 'http[s]:\/\/' -Input $snipeURL).Matches[0].Length)
+
+    if ($checkURL.IndexOf('/') -eq -1)
     {
-        $response = ConvertFrom-Json((Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/bytag/$($asset.ASSET)" -Method GET -Headers $headers).Content)
-        $asset.Serial = $response.serial
-        $asset.CASES = (($response.custom_fields).'CASES Asset').value
-        $asset.Name = $response.name
-        $asset.Model = ($response.model).name
-    }
-    elseif ( -not [string]::IsNullOrWhiteSpace($asset.SERIAL))
-    {
-        $response = ConvertFrom-Json((Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$($asset.SERIAL)" -Method GET -Headers $headers).Content)
-        if ($response.total -eq 1)
+        #Test ICMP connection
+        if ((Test-Connection -TargetName $checkURL))
         {
-            $response = $response.rows[0]
-            $asset.ASSET = $response.asset_tag
-            $asset.CASES = (($response.custom_fields).'CASES Asset').value
-            $asset.Name = $response.name
-            $asset.Model = ($response.model).name
-        }
-        elseif ($response.total -gt 1)
-        {
-            Write-Host "More than one item found with $($asset.SERIAL) continuing to next row"
-            continue
-
+            Write-Log "Successfully to Snipe-IT server at address $checkURL"
         }
         else 
         {
-            Write-Host "No item found with $($asset.SERIAL) continuing to next row"
-            continue
+            Write-Log "Cannot connect to Snipe-IT server at address $checkURL exiting"
+            exit
         }
-        
     }
 
+    #Create Snipe Headers
+    $snipeHeaders=@{}
+    $snipeHeaders.Add("accept", "application/json")
+    $snipeHeaders.Add("Authorization", "Bearer $snipeAPIKey")
+
+    try 
+    {
+        $script:snipeResult = Invoke-WebRequest -Uri "$snipeURL/api/v1/hardware/byserial/$deviceSerial" -Method GET -Headers $snipeHeaders
+
+        if ($script:snipeResult.StatusCode -eq 200)
+        {
+            #Covert from result to JSON content
+            $script:snipeResult = ConvertFrom-JSON($script:snipeResult.Content)
+
+            if ($script:snipeResult.total -eq 1)
+            {
+                Write-Log "Sucessfully retrieved device information for $deviceSerial from Snipe-IT"
+                $script:snipeResult = $script:snipeResult.rows[0]
+                $biosDetails.'USERASSETDATA.ASSET_NUMBER' = $script:snipeResult.asset_tag
+                $biosDetails.'USERASSETDATA.PURCHASE_DATE' = "$(Get-Date (($script:snipeResult.Purchase_Date).date) -format "yyyyMMdd")"
+                $biosDetails.'USERASSETDATA.WARRANTY_END' = "$(Get-Date (($script:snipeResult.Warranty_Expires).date) -format "yyyyMMdd")"
+                $biosDetails.'USERASSETDATA.AMOUNT' = "`$$($script:snipeResult.purchase_cost)"
+                $biosDetails.'NETWORKCONNECTION.WARRANTY_DURATION' = ($script:snipeResult.Warranty_Months).Split(' ')[0]
+                $biosDetails.'NETWORKCONNECTION.SYSTEMNAME' = $script:snipeResult.name
+            }
+            elseif ($script:snipeResult.total -eq 0)
+            {
+                Write-Log "Device $deviceSerial does not exist in Snipe-IT, Exiting"
+                Exit
+            }
+            else 
+            {
+                Write-Log "More than one device with $deviceSerial exists in Snipe-IT, Exiting"
+                Exit
+            }
+            
+        }
+        else 
+        {
+            Write-Log "Cannot retrieve device $deviceSerial from Snipe-IT due to unknown error, exiting"
+            exit
+        }
+    }
+    catch 
+    {
+        Write-Log $_.Exception
+        exit
+    }
 }
 
-$assets #| Export-Csv -Path $importFile -NoTypeInformation#>
+function New-CustomField
+{
+    
+    
+    Param(
+        [string]$fieldKey, #Appended to the USERDEVICE domain
+        [string]$fieldValue #Value the field should contain
+    ) #end param
+    
+    if ([string]::IsNullOrWhiteSpace($fieldKey))
+    {
+        Write-Log "Cannot create custom field as no valid field name was provided"
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($fieldValue))
+    {
+        Write-Log "Cannot create custom field $fieldKey as no valid field data was provided"
+        return
+    }
+
+    #Check the number of custom fields as 5 is the max, see if they are all used, if not create the field and add it to the hastable
+    $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
+}
+
+function Set-BIOSData
+{
+    foreach ($field in $biosDetails.GetEnumerator())
+    {
+        if (-not [string]::IsNullOrWhiteSpace($field.Value))
+        {
+            Write-Host "`"$($field.Key)=$($field.Value)`""
+        }
+    }
+}
+
+#-----------------------------------------------------------[Execution]------------------------------------------------------------
+
+#Log-Start -LogPath $sLogPath -LogName $sLogName -ScriptVersion $sScriptVersion
+
+#Set snipeResult to null and declare here so data can be passed to other functions if needed
+
+Get-SnipeData
+Set-ImageData
+Set-Inventoried
+New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'ITAM Number'.Value
+New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value
+Set-BIOSData
+
+#Check to ensure that the manafacturer is LENOVO and the model is supported
+# Lookup Assignment in Snipe
+# Set Array variables to Snipe Data where appropriate
+# Set data into BIOS where appropriate$

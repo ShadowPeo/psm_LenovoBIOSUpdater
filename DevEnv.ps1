@@ -1,4 +1,8 @@
 ##Temporary Variables used for development and troubleshooting
-$deviceSerial = "R912XZZX" #Exists and assinged
-#$deviceSerial = "R912XDM4" #Exists and not assigned
-#$deviceSerial = "R912XZZXZ" #Does not exist
+$devSerial = "R912XZZX" #Exists and assinged
+#$devSerial = "R912XDM4" #Exists and not assigned
+#$devSerial = "R912XZZXZ" #Does not exist
+
+$_SMSTSPackageID = "DECOM"
+
+$dryRun = $true
