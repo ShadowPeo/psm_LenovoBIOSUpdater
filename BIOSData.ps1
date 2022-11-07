@@ -35,7 +35,7 @@ $ErrorActionPreference = "SilentlyContinue"
 
 #Modules
 Import-Module "$PSScriptRoot/Config.ps1" #Contains protected data (API Keys, URLs etc)
-Import-Module "$PSScriptRoot/DevEnv.ps1" -Force ##Temporary Variables used for development and troubleshooting
+#Import-Module "$PSScriptRoot/DevEnv.ps1" -Force ##Temporary Variables used for development and troubleshooting
 
 #----------------------------------------------------------[Declarations]----------------------------------------------------------
 
@@ -101,8 +101,8 @@ function Set-Inventoried
 function Get-SnipeData
 {
     # Retrieve Serial from BIOS
-    #$deviceSerial = (Get-CimInstance win32_bios | Select serialnumber).serialnumber
-    $deviceSerial = $devSerial
+    $deviceSerial = (Get-CimInstance win32_bios | Select serialnumber).serialnumber
+    #$deviceSerial = $devSerial
     
     $script:snipeResult = $null #Blank Snipe result
 
@@ -144,7 +144,7 @@ function Get-SnipeData
                 $biosDetails.'USERASSETDATA.PURCHASE_DATE' = "$(Get-Date (($script:snipeResult.Purchase_Date).date) -format "yyyyMMdd")"
                 $biosDetails.'USERASSETDATA.WARRANTY_END' = "$(Get-Date (($script:snipeResult.Warranty_Expires).date) -format "yyyyMMdd")"
                 $biosDetails.'USERASSETDATA.AMOUNT' = "`$$($script:snipeResult.purchase_cost)"
-                $biosDetails.'NETWORKCONNECTION.WARRANTY_DURATION' = ($script:snipeResult.Warranty_Months).Split(' ')[0]
+                $biosDetails.'USERASSETDATA.WARRANTY_DURATION' = ($script:snipeResult.Warranty_Months).Split(' ')[0]
                 $biosDetails.'NETWORKCONNECTION.SYSTEMNAME' = $script:snipeResult.name
             }
             elseif ($script:snipeResult.total -eq 0)
@@ -207,13 +207,17 @@ function New-CustomField
 
 function Set-BIOSData
 {
+    #Write-Log
+
     foreach ($field in ($biosDetails.GetEnumerator() | Sort-Object Key))
     {
         #Write-Host ($biosCurrent.($field.Key))
         
         if (-not [string]::IsNullOrWhiteSpace($field.Value) -and ($biosCurrent.Keys -notcontains $field.Key -or ($biosCurrent.Keys -contains $field.Key -and ($biosCurrent.($field.Key)) -ne $field.Value)))
         {
-            Write-Host "`"$($field.Key)=$($field.Value)`""
+            
+            .\WinAIA64.exe -silent -set "`"$($field.Key)=$($field.Value)`""
+
         }
     }
 }
@@ -221,8 +225,8 @@ function Set-BIOSData
 function Get-CurrentBIOSData
 {
     $script:customFieldsUsed = 0
-    #.\WinAIA64.exe -silent -output-file "$PSScriptRoot\temp.txt" -get
-    #Get-Content -Path "$PSScriptRoot\temp.txt"
+    .\WinAIA64.exe -silent -output-file "$PSScriptRoot\output.txt" -get
+
     foreach($row in (Get-Content -Path "$PSScriptRoot\output.txt" | Sort-Object))
     {
         $script:tempData = $null
@@ -265,3 +269,6 @@ Set-BIOSData
 # Check to ensure that the manafacturer is LENOVO and the model is supported
 # DECOM
 # Set data into BIOS where appropriate
+# Add Loggings Notes
+# Add Deletion of temporary output file
+# Add Download and extract of WinAIA
