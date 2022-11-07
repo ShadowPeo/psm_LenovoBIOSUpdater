@@ -1,5 +1,11 @@
-Import-Module "$PSScriptRoot/Config.ps1" #Contains protected data (API Keys, URLs etc)
+param 
+    (
+        #School Details
+        #[string]$mode = "FirstRun" #Used to define where in the process the script is starting from
+    )
 
+Import-Module "$PSScriptRoot/Config.ps1" #Contains protected data (API Keys, URLs etc)
+Import-Module "$PSScriptRoot/DevEnv.ps1" ##Temporary Variables used for development and troubleshooting
 
 $headers=@{}
 $headers.Add("accept", "application/json")

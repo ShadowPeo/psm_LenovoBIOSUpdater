@@ -1,2 +1,2 @@
 $snipeAPIKey = "my.snipe.APIKey"
-$snipeURL = "https://my.snipe.url"
+$snipeURL = "https://my.snipe.url" #No trailing /
