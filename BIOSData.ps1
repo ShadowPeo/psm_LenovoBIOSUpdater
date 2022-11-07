@@ -54,7 +54,7 @@ $biosDetails =  @{
     "PRELOADPROFILE.IMAGE"=""
     "OWNERDATA.OWNERNAME"="Western Port Secondary College"
     "OWNERDATA.DEPARTMENT"="ICT Department"
-    "OWNERDATA.LOCATION"="Hastings, Victoria Australia"
+    "OWNERDATA.LOCATION"="Hastings, Victoria, Australia"
     "OWNERDATA.PHONE_NUMBER"="03 5979 1577"
     "OWNERDATA.OWNERPOSITION"=""
     "LEASEDATA.LEASE_START_DATE"=""
@@ -69,6 +69,8 @@ $biosDetails =  @{
     "USERASSETDATA.AMOUNT"=""
     "USERASSETDATA.ASSET_NUMBER"=""
 }
+
+$biosCurrent = @{}
 
 # Decomission Task Sequence ID's - this is used to blank the data
 $decomIDs = @(
@@ -101,6 +103,7 @@ function Get-SnipeData
     # Retrieve Serial from BIOS
     #$deviceSerial = (Get-CimInstance win32_bios | Select serialnumber).serialnumber
     $deviceSerial = $devSerial
+    
     $script:snipeResult = $null #Blank Snipe result
 
     $checkURL=$snipeURL.Substring((Select-String 'http[s]:\/\/' -Input $snipeURL).Matches[0].Length)
@@ -171,13 +174,12 @@ function Get-SnipeData
 
 function New-CustomField
 {
-    
-    
     Param(
         [string]$fieldKey, #Appended to the USERDEVICE domain
         [string]$fieldValue #Value the field should contain
     ) #end param
     
+    # Validate Input and output error if not valid
     if ([string]::IsNullOrWhiteSpace($fieldKey))
     {
         Write-Log "Cannot create custom field as no valid field name was provided"
@@ -190,19 +192,56 @@ function New-CustomField
         return
     }
 
-    #Check the number of custom fields as 5 is the max, see if they are all used, if not create the field and add it to the hastable
-    $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
+    # Check the number of custom fields as 5 is the max, see if they are all used, if not create the field and add it to the hastable
+    if ($script:customFieldsUsed -lt 5)
+    {
+        $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
+        $script:customFieldsUsed++
+    }
+    else 
+    {
+        Write-Log "Cannot create custom field $fieldKey as all possible custom fields used"
+    }
+
 }
 
 function Set-BIOSData
 {
-    foreach ($field in $biosDetails.GetEnumerator())
+    foreach ($field in ($biosDetails.GetEnumerator() | Sort-Object Key))
     {
-        if (-not [string]::IsNullOrWhiteSpace($field.Value))
+        #Write-Host ($biosCurrent.($field.Key))
+        
+        if (-not [string]::IsNullOrWhiteSpace($field.Value) -and ($biosCurrent.Keys -notcontains $field.Key -or ($biosCurrent.Keys -contains $field.Key -and ($biosCurrent.($field.Key)) -ne $field.Value)))
         {
             Write-Host "`"$($field.Key)=$($field.Value)`""
         }
     }
+}
+
+function Get-CurrentBIOSData
+{
+    $script:customFieldsUsed = 0
+    #.\WinAIA64.exe -silent -output-file "$PSScriptRoot\temp.txt" -get
+    #Get-Content -Path "$PSScriptRoot\temp.txt"
+    foreach($row in (Get-Content -Path "$PSScriptRoot\output.txt" | Sort-Object))
+    {
+        $script:tempData = $null
+        $script:tempData = $row.Split('=')
+        $biosCurrent.Add($script:tempData[0], $script:tempData[1])
+    }
+
+    foreach ($record in $biosCurrent.GetEnumerator())
+    {
+        if ($record.Key -like "USERDEVICE.*" -and $biosDetails.Keys -notcontains $record.Key)
+        {
+            Write-Host $record.Key
+            $script:customFieldsUsed++
+        }
+
+    }
+
+    Write-Log "Currently $script:customFieldsUsed custom data fields are used"
+    
 }
 
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
@@ -211,6 +250,8 @@ function Set-BIOSData
 
 #Set snipeResult to null and declare here so data can be passed to other functions if needed
 
+Get-CurrentBIOSData
+
 Get-SnipeData
 Set-ImageData
 Set-Inventoried
@@ -218,7 +259,9 @@ New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'
 New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value
 Set-BIOSData
 
-#Check to ensure that the manafacturer is LENOVO and the model is supported
-# Lookup Assignment in Snipe
-# Set Array variables to Snipe Data where appropriate
-# Set data into BIOS where appropriate$
+# TODO
+# Automate Pull of current BIOS info
+# Push info to BIOS
+# Check to ensure that the manafacturer is LENOVO and the model is supported
+# DECOM
+# Set data into BIOS where appropriate
