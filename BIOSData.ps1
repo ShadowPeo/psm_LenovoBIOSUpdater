@@ -35,10 +35,6 @@ $ErrorActionPreference = "SilentlyContinue"
 
 #Dot Source required Function Libraries
 
-#Modules
-Import-Module "$PSScriptRoot/Config.ps1" -Force #Contains protected data (API Keys, URLs etc)
-Import-Module "$PSScriptRoot/DevEnv.ps1" -Force ##Temporary Variables used for development and troubleshooting
-
 #----------------------------------------------------------[Declarations]----------------------------------------------------------
 
 $sLogFile = Join-Path -Path $sLogPath -ChildPath $sLogName
@@ -54,10 +50,10 @@ $biosDetails =  @{
     "NETWORKCONNECTION.LOGINNAME"=""
     "PRELOADPROFILE.IMAGEDATE"=""
     "PRELOADPROFILE.IMAGE"=""
-    "OWNERDATA.OWNERNAME"="Western Port Secondary College"
-    "OWNERDATA.DEPARTMENT"="ICT Department"
-    "OWNERDATA.LOCATION"="Hastings, Victoria, Australia"
-    "OWNERDATA.PHONE_NUMBER"="03 5979 1577"
+    "OWNERDATA.OWNERNAME"=""
+    "OWNERDATA.DEPARTMENT"=""
+    "OWNERDATA.LOCATION"=""
+    "OWNERDATA.PHONE_NUMBER"=""
     "OWNERDATA.OWNERPOSITION"=""
     "LEASEDATA.LEASE_START_DATE"=""
     "LEASEDATA.LEASE_END_DATE"=""
@@ -86,6 +82,9 @@ $winAIAInternet = "https://download.lenovo.com/pccbbs/mobiles"
 
 #Script Variables - Declared to stop it being generated multiple times per run
 $script:snipeResult = $null #Blank Snipe result
+
+#DryRun Settings
+$dryRun = $false
 
 #-----------------------------------------------------------[Functions]------------------------------------------------------------
 
@@ -185,32 +184,42 @@ function Get-SnipeData
 
 function New-CustomField
 {
-    Write-LogBreak
-    Write-Log "Attempting to create a new Custom Field"
-
     Param(
         [string]$fieldKey, #Appended to the USERDEVICE domain
         [string]$fieldValue #Value the field should contain
     ) #end param
-    
+ 
     # Validate Input and output error if not valid
-    if ([string]::IsNullOrWhiteSpace($fieldKey))
+    if ([string]::IsNullOrWhiteSpace($fieldKey) -and $biosCurrent.Keys -notcontains "USERDEVICE.$fieldKey")
     {
+        Write-LogBreak
+        Write-Log "Attempting to create a new Custom Field"
         Write-Log "Cannot create custom field as no valid field name was provided"
         return
     }
 
     if ([string]::IsNullOrWhiteSpace($fieldValue))
     {
-        Write-Log "Cannot create custom field $fieldKey as no valid field data was provided"
+        Write-LogBreak
+        Write-Log "Cannot create/update custom field $fieldKey as no valid field data was provided"
         return
     }
 
     # Check the number of custom fields as 5 is the max, see if they are all used, if not create the field and add it to the hastable
     if ($script:customFieldsUsed -lt 5)
     {
-        $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
-        $script:customFieldsUsed++
+        if ($biosCurrent.Keys -contains "USERDEVICE.$fieldKey" -and $biosCurrent."USERDEVICE.$fieldKey" -ne $fieldValue)
+        {
+            Write-LogBreak
+            Write-Log "Updating Custom Field $fieldKey"
+            $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
+        }
+        elseif ($biosCurrent.Keys -notcontains "USERDEVICE.$fieldKey")
+        {
+            Write-Log "Creating custom field $fieldKey"
+            $biosDetails.Add("USERDEVICE.$fieldKey", $fieldValue)
+            $script:customFieldsUsed++
+        }
     }
     else 
     {
@@ -232,28 +241,36 @@ function Set-BIOSData
     }
     Write-LogBreak
 
+    $noRows = $true
     foreach ($field in ($biosDetails.GetEnumerator() | Sort-Object Key))
     {
-        
-        
         if (-not [string]::IsNullOrWhiteSpace($field.Value) -and ($biosCurrent.Keys -notcontains $field.Key -or ($biosCurrent.Keys -contains $field.Key -and ($biosCurrent.($field.Key)) -ne $field.Value)))
         {
-            
-            Write-Log "Setting $($field.Key) to $($field.Value)"
-            
+            $noRows = $false
             if ($dryRun -eq $false)
             {
                 if ($field.Value -ne "BLANK")
                 {
+                    Write-Log "Setting $($field.Key) to $($field.Value)"
                     .\WinAIA64.exe -silent -set "`"$($field.Key)=$($field.Value)`""
                 }
-                else 
+                elseif ($field.Value -eq "BLANK" -and $biosCurrent.Keys -contains $field.Key)
                 {
+                    Write-Log "Setting $($field.Key) to $($field.Value)"
                     .\WinAIA64.exe -silent -set "`"$($field.Key)=`""
                 }
             }
+            else
+            {
+                Write-Log "Setting $($field.Key) to $($field.Value)"
+            }
 
         }
+    }
+
+    if ($noRows -eq $true)
+    {
+        Write-Log "All data fields are up to date, do not need to write anything"
     }
 }
 
@@ -262,20 +279,20 @@ function Set-BIOSData
 function Get-CurrentBIOSData
 {
     Write-LogBreak
-    Write-Log "Retrieving current BIOS Data"
+    Write-Log "Retrieving current BIOS data"
     Write-LogBreak
 
     $script:customFieldsUsed = 0
     if (Test-Path -Path "output.txt")
     {
         Write-Log "Removing previously generated BIOS Settings output file"
-        #Remove-Item "output.txt"
+        Remove-Item "output.txt"
     }
 
     try 
     {
 
-        #.\WinAIA64.exe -silent -output-file "output.txt" -get
+        .\WinAIA64.exe -silent -output-file "output.txt" -get
 
         if (Test-Path -Path "output.txt")
         {
@@ -298,7 +315,7 @@ function Get-CurrentBIOSData
 
             Write-Log "Currently $script:customFieldsUsed custom data fields are used"
             Write-Log "Removing generated BIOS Settings output file"
-            #Remove-Item "output.txt"
+            Remove-Item "output.txt"
 
         }
         else 
@@ -318,9 +335,13 @@ function Get-CurrentBIOSData
 
 #Log-Start -LogPath $sLogPath -LogName $sLogName -ScriptVersion $sScriptVersion
 
+#Modules - Imported here to override defaults
+Import-Module "$PSScriptRoot/Config.ps1" -Force #Contains protected data (API Keys, URLs etc)
+#Import-Module "$PSScriptRoot/DevEnv.ps1" -Force ##Temporary Variables used for development and troubleshooting
+
 # Retrieve Serial from BIOS
-#$deviceSerial = (Get-CimInstance win32_bios | Select-Object serialnumber).serialnumber
-$deviceSerial = $devSerial
+$deviceSerial = (Get-CimInstance win32_bios | Select-Object serialnumber).serialnumber
+#$deviceSerial = $devSerial
 
 Write-LogBreak
 if (-not [string]::IsNullOrWhiteSpace($deviceSerial))
@@ -338,12 +359,11 @@ else
 }
 
 # Check that the system in manufactured by Lenovo
-<#If (((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer) -ne "LENOVO")
+If (((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer) -ne "LENOVO")
 {
     Write-Log "This is not a Lenovo device it is manafactured by $((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer), exiting"
     Exit
 }
-#>
 
 Write-LogBreak
 Write-Log "Checking if WinAIA Utility Exists"
@@ -385,9 +405,6 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
                 $_.Exception.Response.StatusCode.Value__
             }
         }
-
-        #Set location to AIA Path
-        Set-Location -Path $winAIAPath
         
         if (Test-Path("$winAIAPath/$winAIAPackage"))
         {
@@ -427,19 +444,31 @@ else
     Write-Log "WinAIA Found, Continuing"
 }
 
+#Set location to AIA Path
+Set-Location -Path $winAIAPath
 
 #Get Current BIOS Data
 Get-CurrentBIOSData
 
 #Insert data if not decomissioning
-if (-not [string]::IsNullOrWhiteSpace($env:_SMSTSPackageID) -and $decomIDs -notcontains $env:_SMSTSPackageID)
+if ([string]::IsNullOrWhiteSpace($env:_SMSTSPackageID))
 {
     Write-LogBreak
-    Write-Log "Processing Tasks"
+    Write-Log "Processing Tasks - Inventory"
     Write-LogBreak
     Write-Log "This is a non-decommission run, setting data"
-    Write-LogBreak
+    Get-SnipeData
+    Set-Inventoried
+    New-CustomField -fieldKey "ITAM_NUMBER" -fieldValue $snipeResult.custom_fields.'ITAM Number'.Value
+    New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value    
 
+}
+elseif (-not [string]::IsNullOrWhiteSpace($env:_SMSTSPackageID) -and $decomIDs -notcontains $env:_SMSTSPackageID)
+{
+    Write-LogBreak
+    Write-Log "Processing Tasks - Imaging"
+    Write-LogBreak
+    Write-Log "This is a non-decommission run, setting data"
     Get-SnipeData
     Set-ImageData
     Set-Inventoried
@@ -449,7 +478,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:_SMSTSPackageID) -and $decomIDs -notc
 else 
 {
     Write-LogBreak
-    Write-Log "Processing Tasks"
+    Write-Log "Processing Tasks - Decommissioning"
     Write-LogBreak
     Write-Log "This is a decommission run, blanking all data and setting asset tag to DECOM"
 
@@ -479,6 +508,3 @@ Set-BIOSData
 Write-LogBreak
 Write-Log "BIOS Data checks complete, exiting"
 Write-LogBreak
-
-# TODO
-# DECOM - need to test actual changing of the settings
