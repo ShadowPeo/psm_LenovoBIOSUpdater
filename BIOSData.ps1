@@ -100,7 +100,7 @@ function Write-LogBreak ($logMessage)
 
 function Set-ImageData
 {
-    $biosDetails.'PRELOADPROFILE.IMAGE' = $env:_SMSTSPackageID
+    $biosDetails.'PRELOADPROFILE.IMAGE' = $TSEnv:TASKSEQUENCEID
     $biosDetails.'PRELOADPROFILE.IMAGEDATE' = "$(Get-Date -format "yyyyMMdd")"
 }
 
@@ -451,7 +451,7 @@ Set-Location -Path $winAIAPath
 Get-CurrentBIOSData
 
 #Insert data if not decomissioning
-if ([string]::IsNullOrWhiteSpace($env:_SMSTSPackageID))
+if ([string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID))
 {
     Write-LogBreak
     Write-Log "Processing Tasks - Inventory"
@@ -463,7 +463,7 @@ if ([string]::IsNullOrWhiteSpace($env:_SMSTSPackageID))
     New-CustomField -fieldKey "CASES_ASSET" -fieldValue $snipeResult.custom_fields.'CASES Asset'.Value    
 
 }
-elseif (-not [string]::IsNullOrWhiteSpace($env:_SMSTSPackageID) -and $decomIDs -notcontains $env:_SMSTSPackageID)
+elseif (-not [string]::IsNullOrWhiteSpace($TSEnv:TASKSEQUENCEID) -and $decomIDs -notcontains $TSEnv:TASKSEQUENCEID)
 {
     Write-LogBreak
     Write-Log "Processing Tasks - Imaging"
