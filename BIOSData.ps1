@@ -37,7 +37,7 @@ $ErrorActionPreference = "SilentlyContinue"
 
 #----------------------------------------------------------[Declarations]----------------------------------------------------------
 
-$sLogFile = Join-Path -Path $sLogPath -ChildPath $sLogName
+$logPath = "C:\Temp\"
 
 
 # These are the fields able to be set, use this array to set defaults - anything that has not value set upon processing will be ignored and thus no change will be made to existing data. To Blank the field please set to BLANK (Case Sesnsive)
@@ -88,13 +88,25 @@ $dryRun = $false
 
 #-----------------------------------------------------------[Functions]------------------------------------------------------------
 
+
 function Write-Log ($logMessage)
 {
     Write-Host "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
+    #Write to logfile if the logpath is set
+    if (-not [string]::IsNullOrWhiteSpace($logPath))
+    {
+        Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - $logMessage"
+    }
 }
 function Write-LogBreak ($logMessage)
 {
     Write-Host "--------------------------------------------------------------------------------------"
+    
+    #Write to logfile if the logpath is set
+    if (-not [string]::IsNullOrWhiteSpace($logPath))
+    {
+        Add-content "$logPath\$(Get-Date -UFormat '+%Y-%m-%d %H:%M:%S') - BIOSData.log" "--------------------------------------------------------------------------------------"
+    }
 }
 
 
@@ -333,7 +345,11 @@ function Get-CurrentBIOSData
 
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
 
-#Log-Start -LogPath $sLogPath -LogName $sLogName -ScriptVersion $sScriptVersion
+#Start log if file path exists
+if (!([string]::IsNullOrWhiteSpace($logPath)) -and !(Test-Path $logPath))
+{
+    New-Item -ItemType Directory -Force -Path $logPath
+}
 
 #Modules - Imported here to override defaults
 Import-Module "$PSScriptRoot/Config.ps1" -Force #Contains protected data (API Keys, URLs etc)
@@ -386,7 +402,7 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
             Write-Log "Cache Location specified and found, trying to pull from cache"
             try 
             {
-                Copy-Item "$winAIACache/$winAIAPackage" -Destination $winAIAPath
+                Copy-Item "$winAIACache\$winAIAPackage" -Destination $winAIAPath
             }
             catch
             {
@@ -398,7 +414,7 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
             Write-Log "Cache Location not specified or found, trying to pull from internet"
             try 
             {
-                Invoke-WebRequest -Uri "$winAIAInternet/$winAIAPackage" -OutFile "$winAIAPath/$winAIAPackage" | Out-Null    
+                Invoke-WebRequest -Uri "$winAIAInternet/$winAIAPackage" -OutFile "$winAIAPath\$winAIAPackage" | Out-Null    
             }
             catch 
             {
@@ -411,7 +427,10 @@ if (-not (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf))
             Write-Log "Retrieved WinAIA package, trying to extract"
             try 
             {
-                Start-Process "$winAIAPath/$winAIAPackage" -ArgumentList "/VERYSILENT /DIR=.\ /EXTRACT=YES" -Wait
+                Set-Location -Path $winAIAPath
+
+                Start-Process "$winAIAPath\$winAIAPackage" -ArgumentList "/VERYSILENT /DIR=.\ /EXTRACT=YES" -Wait
+                
                 if (Test-Path "$winAIAPath/WinAIA64.exe" -PathType Leaf)
                 {
                     Write-Log "WinAIA successfully extracted, continuing"
